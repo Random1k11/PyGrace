@@ -1,3 +1,5 @@
+import inspect
+
 from webob import Request, Response
 from parse import parse
 
@@ -8,17 +10,21 @@ class API:
         self.routes = {}
 
     def route(self, path):
+        assert path not in self.routes, "Such route already exists."
         def wrapper(handler):
             self.routes[path] = handler
             return handler
         return wrapper
 
+    def __call__(self, environ, start_response):
+        request = Request(environ)
+        response = self.handle_request(request)
+        return response(environ, start_response)
+
     def find_handler(self, request_path):
         for path, handler in self.routes.items():
-            print(path, request_path)
             parse_result = parse(path, request_path)
             if parse_result is not None:
-                print(parse_result.named)
                 return handler, parse_result.named
         return None, None
 
@@ -26,7 +32,15 @@ class API:
         response = Response()
         handler, kwargs = self.find_handler(request_path=request.path)
         if handler is not None:
-            handler(request, response, **kwargs)
+            if inspect.isclass(handler):
+                handler_function = getattr(handler(), request.method.lower(), None)
+                print(handler_function.__name__)
+                print(handler_function(request, response, **kwargs))
+                if handler_function is None:
+                    raise AttributeError("Method now allowed", request.method)
+                pass   # class based handler is being used
+            else:
+                handler(request, response, **kwargs)
         else:
             self.default_response(response)
         return response
@@ -34,8 +48,3 @@ class API:
     def default_response(self, response):
         response.status_code = 404
         response.text = "Not found."
-
-    def __call__(self, environ, start_response):
-        request = Request(environ)
-        response = self.handle_request(request)
-        return response(environ, start_response)
